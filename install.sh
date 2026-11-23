@@ -134,16 +134,35 @@ login() {
 }
 
 # offline BUNDLE.tar: verifies and loads an air-gapped bundle (ADR-0066).
+# Nothing from the archive runs: the signature and the checksums are
+# checked here, as deploy/airgap/install.sh does, then only the image
+# archive is handed to docker load.
 offline() {
-  local tar=$1 tmp b
+  local tar=$1 tmp b listed present
   [ -s "$tar" ] || die "$(t "no such file: $tar" "fichier introuvable : $tar")"
   [ -n "$pubkey" ] || [ -n "$unsigned" ] || die "$(t "give the release public key with --pubkey (or --unsigned for a test bundle)" "donnez la clé publique de la version avec --pubkey (ou --unsigned pour un bundle de test)")"
+  [ -z "$pubkey" ] || [ -s "$pubkey" ] || die "$(t "no such public key: $pubkey" "clé publique introuvable : $pubkey")"
+  command -v sha256sum >/dev/null || die "$(t "sha256sum is required" "sha256sum est nécessaire")"
   tmp=$(mktemp -d)
-  tar -C "$tmp" -xf "$tar"
+  # No absolute path nor .. in the archive.
+  if tar -tf "$tar" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then rm -rf "$tmp"; die "$(t "unsafe paths in $tar" "chemins dangereux dans $tar")"; fi
+  tar -C "$tmp" --no-same-owner -xf "$tar"
   b=$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -1)
-  [ -x "$b/install.sh" ] || die "$(t "not an air-gapped bundle: $tar" "ce n'est pas un bundle hors ligne : $tar")"
-  if [ -n "$pubkey" ]; then "$b/install.sh" load --pubkey "$(readlink -f "$pubkey")"; else "$b/install.sh" load --unsigned; fi
-  [ -n "$version" ] || version=$(cat "$b/VERSION")
+  [ -n "$b" ] && [ -s "$b/SHA256SUMS" ] && [ -s "$b/images.tar.gz" ] || { rm -rf "$tmp"; die "$(t "not an air-gapped bundle: $tar" "ce n'est pas un bundle hors ligne : $tar")"; }
+  if [ -n "$pubkey" ]; then
+    [ -s "$b/SHA256SUMS.sig" ] || { rm -rf "$tmp"; die "$(t "this bundle is not signed" "ce bundle n'est pas signé")"; }
+    openssl pkeyutl -verify -pubin -inkey "$pubkey" -rawin -in "$b/SHA256SUMS" -sigfile "$b/SHA256SUMS.sig" >/dev/null 2>&1 ||
+      { rm -rf "$tmp"; die "$(t "the signature does not match $pubkey: do not install this bundle" "la signature ne correspond pas à $pubkey : n'installez pas ce bundle")"; }
+  else
+    warn "$(t "signature not checked (--unsigned): the checksums prove nothing about the origin" "signature non vérifiée (--unsigned) : les sommes de contrôle ne prouvent rien de l'origine")"
+  fi
+  (cd "$b" && sha256sum --quiet -c SHA256SUMS) || { rm -rf "$tmp"; die "$(t "a file of the bundle does not match SHA256SUMS" "un fichier du bundle ne correspond pas à SHA256SUMS")"; }
+  listed=$(sed 's/^[0-9a-f]\{64\}  //' "$b/SHA256SUMS" | LC_ALL=C sort)
+  present=$(cd "$b" && find . -type f ! -name SHA256SUMS ! -name SHA256SUMS.sig | sed 's|^\./||' | LC_ALL=C sort)
+  [ "$listed" = "$present" ] || { rm -rf "$tmp"; die "$(t "the bundle has files SHA256SUMS does not list" "le bundle contient des fichiers absents de SHA256SUMS")"; }
+  say "$(t "Loading the images..." "Chargement des images...")"
+  gzip -dc "$b/images.tar.gz" | docker load -q >/dev/null || { rm -rf "$tmp"; die "docker load"; }
+  [ -n "$version" ] || version=$(head -1 "$b/VERSION")
   rm -rf "$tmp"
 }
 
