@@ -4,7 +4,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/su2626/bastionos-install/main/install.sh | sudo bash -s 1.4.0
 #
-#   bash install.sh [VERSION] [--dir /var/dck/bastionos] [--yes] [--no-backup]
+#   bash install.sh [VERSION] [--dir /var/dck/bastionos (asked if not given)] [--yes] [--no-backup]
 #                   [--registry ghcr.io/su2626/bastionos]
 #                   [--bundle bastionos-airgap-1.4.0-linux-amd64.tar
 #                    (--pubkey release.pub | --unsigned)]
@@ -25,7 +25,7 @@
 set -euo pipefail
 
 main() {
-  local version= dir=/var/dck/bastionos registry=ghcr.io/su2626/bastionos bundle= pubkey= unsigned= yes= nobackup=
+  local version= dir=${BASTION_INSTALL_DIR:-} registry=ghcr.io/su2626/bastionos bundle= pubkey= unsigned= yes= nobackup=
   while [ $# -gt 0 ]; do
     case $1 in
       --dir) dir=$2; shift 2 ;;
@@ -46,6 +46,20 @@ main() {
   docker info >/dev/null 2>&1 || die "$(t "cannot talk to Docker (run as root, or as a member of the docker group)" "impossible de joindre Docker (lancez en root, ou membre du groupe docker)")"
   docker compose version >/dev/null 2>&1 || die "$(t "Docker Compose v2 is required" "Docker Compose v2 est nécessaire")"
   command -v openssl >/dev/null || die "$(t "openssl is required" "openssl est nécessaire")"
+
+  # The installation directory: --dir, BASTION_INSTALL_DIR, or asked on the
+  # terminal (the default kept under --yes or without a terminal).
+  if [ -z "$dir" ]; then
+    dir=/var/dck/bastionos
+    if [ -z "$yes" ] && [ ! -s "$dir/deploy/compose/.env" ] && (: </dev/tty) 2>/dev/null; then
+      local answer=
+      printf '%s [%s]: ' "$(t "Installation directory" "Dossier d'installation")" "$dir" >&2
+      IFS= read -r answer </dev/tty || true
+      [ -z "$answer" ] || dir=$answer
+    fi
+  fi
+  case $dir in /*) ;; *) die "$(t "the installation directory must be an absolute path: $dir" "le dossier d'installation doit être un chemin absolu : $dir")" ;; esac
+  dir=${dir%/}
 
   if [ -n "$bundle" ]; then
     offline "$bundle"
