@@ -119,8 +119,8 @@ main() {
 
 t() { if [ -n "${FR:-}" ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
 say() { printf '%s\n' "$*" >&2; }
-warn() { printf '%s %s\n' "$(t warning: attention :)" "$*" >&2; }
-die() { printf '%s %s\n' "$(t error: erreur :)" "$*" >&2; exit 1; }
+warn() { printf '%s %s\n' "$(t "warning:" "attention :")" "$*" >&2; }
+die() { printf '%s %s\n' "$(t "error:" "erreur :")" "$*" >&2; exit 1; }
 
 # login IMAGE: pulls the installer image, signing in to its registry first
 # when it cannot be read anonymously. The token is read on the terminal (or from
