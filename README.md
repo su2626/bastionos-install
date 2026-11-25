@@ -7,8 +7,11 @@ scripts and the `bastionos` command) from its private image on ghcr.io,
 then asks its questions and starts the stack.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/su2626/bastionos-install/main/install.sh | sudo bash -s 1.4.0
+curl -fsSL https://raw.githubusercontent.com/su2626/bastionos-install/main/install.sh | sudo bash
 ```
+
+With no version it installs the latest one, 1.0.0; name one to pin it
+(`… | sudo bash -s 1.0.0`).
 
 - Requires Docker with Compose 2.24 or later, and openssl.
 - The images are private: have the account and the token (`read:packages`)

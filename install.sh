@@ -2,9 +2,10 @@
 # BastionOS installer (ADR-0095). Public: it holds no secret and no code of
 # BastionOS, only the steps to fetch an installation bundle.
 #
-#   curl -fsSL https://raw.githubusercontent.com/su2626/bastionos-install/main/install.sh | sudo bash -s 1.4.0
+#   curl -fsSL https://raw.githubusercontent.com/su2626/bastionos-install/main/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/su2626/bastionos-install/main/install.sh | sudo bash -s 1.0.0
 #
-#   bash install.sh [VERSION] [--dir /var/dck/bastionos (asked if not given)] [--yes] [--no-backup]
+#   bash install.sh [VERSION (default: the latest version, BASTION_LATEST)] [--dir /var/dck/bastionos (asked if not given)] [--yes] [--no-backup]
 #                   [--registry ghcr.io/su2626/bastionos]
 #                   [--bundle bastionos-airgap-1.4.0-linux-amd64.tar
 #                    (--pubkey release.pub | --unsigned)]
@@ -23,6 +24,11 @@
 # after a backup (--no-backup skips it).
 # --bundle installs from an air-gapped bundle (ADR-0066) without Internet.
 set -euo pipefail
+
+# The latest version: installed when none is named. Moved at each release
+# (docs/deployment/RELEASING.md). "main" installs the latest build of the
+# main branch, for tests only.
+BASTION_LATEST=1.0.0
 
 main() {
   local version= dir=${BASTION_INSTALL_DIR:-} registry=ghcr.io/su2626/bastionos bundle= pubkey= unsigned= yes= nobackup=
@@ -70,12 +76,12 @@ main() {
     if [ -f "$dir/deploy/compose/.env" ]; then
       version=$(sed -n 's/^BASTION_VERSION=//p' "$dir/deploy/compose/.env" | tail -1)
     else
-      version=main
-      warn "$(t "no version given: installing \"main\", the latest build of the main branch; name a release on a real installation" "aucune version donnée : installation de « main », la dernière construction de la branche principale ; nommez une version sur une vraie installation")"
+      version=$BASTION_LATEST
+      say "$(t "no version given: installing the latest version, $version" "aucune version donnée : installation de la dernière version, $version")"
     fi
   fi
   printf '%s\n' "$version" | grep -Eq '^(main|sha-[0-9a-f]{12}|[0-9]+\.[0-9]+(\.[0-9]+(-[0-9A-Za-z.-]+)?)?)$' ||
-    die "$(t "not a version: $version (1.4.0, 1.4, main or sha-<12 hex>)" "version invalide : $version (1.4.0, 1.4, main ou sha-<12 hex>)")"
+    die "$(t "not a version: $version (1.0.0, 1.0, main or sha-<12 hex>)" "version invalide : $version (1.0.0, 1.0, main ou sha-<12 hex>)")"
 
   umask 022
   mkdir -p "$dir"
