@@ -13,7 +13,9 @@
 # 1. checks Docker, Compose v2 and openssl;
 # 2. signs in to the registry when the images are private (a token that can
 #    read the packages, kept in <dir>/.docker for upgrades);
-# 3. takes the deployment bundle of VERSION out of its installer image:
+# 3. checks the signature of the installer image of VERSION (cosign, signed
+#    by BastionOS's CI without a key) and takes the deployment bundle out of
+#    it, by digest:
 #    Compose files, OpenBao configuration, operating scripts and the
 #    `bastionos` command. No source code is installed;
 # 4. runs `bastionos install`, which asks its questions on the terminal,
@@ -93,6 +95,9 @@ main() {
   local img="$registry/installer:$version"
   if [ -z "$bundle" ]; then
     login "$img"
+    docker pull -q "$img" >/dev/null || die "$(t "cannot pull $img: does version $version exist, and may this token read it?" "impossible de tirer $img : la version $version existe-t-elle, et ce jeton peut-il la lire ?")"
+    # The image signed by BastionOS's CI, by digest from here on.
+    img=$(verify_image "$img" "$version") || exit 1
   fi
 
   # An installed host is upgraded: its own command knows how.
@@ -104,7 +109,6 @@ main() {
   say "$(t "Fetching the bundle $version..." "Récupération du bundle $version...")"
   local tmp cid
   tmp=$(mktemp -d "$dir/.bundle.XXXXXX")
-  [ -n "$bundle" ] || docker pull -q "$img" >/dev/null || die "$(t "cannot pull $img: does version $version exist, and may this token read it?" "impossible de tirer $img : la version $version existe-t-elle, et ce jeton peut-il la lire ?")"
   cid=$(docker create "$img" bundle) || die "$(t "image $img not found" "image $img introuvable")"
   docker cp "$cid:/bundle/." "$tmp" >/dev/null
   docker rm -f "$cid" >/dev/null
@@ -151,6 +155,52 @@ login() {
     die "$(t "sign-in to $host refused" "connexion à $host refusée")"
   chmod 600 "$DOCKER_CONFIG/config.json" 2>/dev/null || true
   say "$(t "Signed in to $host (kept in $DOCKER_CONFIG for upgrades)." "Connecté à $host (gardé dans $DOCKER_CONFIG pour les mises à jour).")"
+}
+
+# BastionOS's images are signed in CI with cosign, without a key: the
+# signature carries a certificate that names the workflow of the repository
+# that built the image (GitHub Actions OIDC), and it is written to the
+# public Sigstore logs. verify_image IMAGE checks it and prints the image's
+# digest reference, which is what is run next: a tag moved after the check
+# runs nothing. Versions published before signing (UNSIGNED_VERSIONS) pass
+# with a warning. BASTION_SKIP_IMAGE_SIGNATURE=1 skips the check (a mirror
+# that dropped the signatures): it is said each time.
+COSIGN_IMAGE=${BASTION_COSIGN_IMAGE:-ghcr.io/sigstore/cosign/cosign:v2.6.1@sha256:68839b7f13dac5a6744a5d8818e984dd39183374e37855c19e14d623d9bc9037}
+SIGNER_ISSUER=https://token.actions.githubusercontent.com
+UNSIGNED_VERSIONS="1.0.0"
+# signer_identity IMAGE: the workflow that must have signed IMAGE.
+signer_identity() {
+  local repo=bastionos
+  case $1 in "${DEFAULT_PREMIUM_REGISTRY:-ghcr.io/su2626/bastionos-premium}"/*|*/bastionos-premium/*) repo=bastionos-premium ;; esac
+  printf '^https://github[.]com/su2626/%s/[.]github/workflows/ci[.]yml@refs/(heads/main|tags/v[0-9][0-9.A-Za-z-]*)$' "$repo"
+}
+verify_image() {
+  local img=$1 ver=${2:-} name ref out
+  name=${img%@*}
+  case ${name##*/} in *:*) name=${name%:*} ;; esac
+  ref=$(docker inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$img" 2>/dev/null | grep -F "$name@sha256:" | head -1) ||
+    die "$(t "$img has no registry digest: pull it first" "$img n'a pas d'empreinte de registre : tirez-la d'abord")"
+  if [ "${BASTION_SKIP_IMAGE_SIGNATURE:-}" = 1 ]; then
+    warn "$(t "signature of $ref not checked (BASTION_SKIP_IMAGE_SIGNATURE)" "signature de $ref non vérifiée (BASTION_SKIP_IMAGE_SIGNATURE)")"
+    printf '%s' "$ref"; return 0
+  fi
+  if [ -n "$ver" ] && [[ " $UNSIGNED_VERSIONS " == *" $ver "* ]]; then
+    warn "$(t "$ver was published before images were signed: $ref is not checked" "$ver a été publiée avant la signature des images : $ref n'est pas vérifiée")"
+    printf '%s' "$ref"; return 0
+  fi
+  # cosign's image runs as a non-root user by default, which cannot read
+  # the 0600 login: run it as the owner of DOCKER_CONFIG (root inside a
+  # rootless daemon, where the host user's files belong to root).
+  local as
+  as="$(id -u):$(id -g)"
+  if docker info -f '{{json .SecurityOptions}}' 2>/dev/null | grep -q rootless; then as=0:0; fi
+  if ! out=$(docker run --rm --user "$as" --tmpfs /tmp -e HOME=/tmp -e DOCKER_CONFIG=/docker -v "$DOCKER_CONFIG:/docker:ro" "$COSIGN_IMAGE" verify \
+      --certificate-oidc-issuer "$SIGNER_ISSUER" --certificate-identity-regexp "$(signer_identity "$name")" \
+      -o text "$ref" 2>&1); then
+    say "$out"
+    die "$(t "the signature of $ref does not check: do not run this image" "la signature de $ref ne se vérifie pas : n'utilisez pas cette image")"
+  fi
+  printf '%s' "$ref"
 }
 
 # offline BUNDLE.tar: verifies and loads an air-gapped bundle (ADR-0066).

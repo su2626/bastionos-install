@@ -19,6 +19,11 @@ With no version it installs the latest one, 1.0.0; name one to pin it
   `BASTION_REGISTRY_TOKEN`.
 - Installs in `/var/dck/bastionos` (`--dir` to change). Run again on an
   installed host to upgrade.
+- Before running anything it checks the cosign signature of the installer
+  image (signed by BastionOS's CI without a key, through GitHub Actions
+  OIDC, and logged in the public Sigstore logs) and runs it by digest. It
+  needs `tuf-repo-cdn.sigstore.dev` and `rekor.sigstore.dev`. 1.0.0 was
+  published before signing and passes with a warning.
 - Without Internet access: `bash install.sh --bundle bastionos-airgap-<version>-linux-amd64.tar --pubkey release.pub`.
 
 Afterwards: `bastionos status`, `bastionos backup`, `bastionos upgrade <version>`.
