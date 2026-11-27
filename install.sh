@@ -121,12 +121,22 @@ main() {
   # ~/.local/bin (docker group, rootless Docker); never over a file that is
   # not a link. The full path is said otherwise.
   local d at=
-  for d in /usr/local/bin ${HOME:+"$HOME/.local/bin"}; do
-    [ "$d" = /usr/local/bin ] || mkdir -p "$d" 2>/dev/null || continue
-    [ -d "$d" ] && [ -w "$d" ] || continue
-    [ ! -e "$d/bastionos" ] || [ -L "$d/bastionos" ] || continue
-    ln -sfn "$dir/bastionos" "$d/bastionos" 2>/dev/null || continue
-    at=$d; break
+  # A directory of PATH first (a root shell may lack /usr/local/bin, then
+  # /usr/bin is taken), else /usr/local/bin or ~/.local/bin with a warning.
+  local pass
+  for pass in in-path any; do
+    for d in /usr/local/bin ${HOME:+"$HOME/.local/bin"} /usr/bin; do
+      if [ "$pass" = in-path ]; then
+        case ":$PATH:" in *":$d:"*) ;; *) continue ;; esac
+      else
+        [ "$d" != /usr/bin ] || continue
+        [ "$d" = /usr/local/bin ] || mkdir -p "$d" 2>/dev/null || continue
+      fi
+      [ -d "$d" ] && [ -w "$d" ] || continue
+      [ ! -e "$d/bastionos" ] || [ -L "$d/bastionos" ] || continue
+      ln -sfn "$dir/bastionos" "$d/bastionos" 2>/dev/null || continue
+      at=$d; break 2
+    done
   done
   if [ -z "$at" ]; then
     warn "$(t "the command is $dir/bastionos (no link could be made: sudo ln -s $dir/bastionos /usr/local/bin/bastionos)" "la commande est $dir/bastionos (aucun lien n'a pu être créé : sudo ln -s $dir/bastionos /usr/local/bin/bastionos)")"
