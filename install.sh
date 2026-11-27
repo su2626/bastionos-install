@@ -75,8 +75,21 @@ main() {
     export BASTION_INSTALL_SOURCE=airgap
   fi
   if [ -z "$version" ]; then
-    if [ -f "$dir/deploy/compose/.env" ]; then
-      version=$(sed -n 's/^BASTION_VERSION=//p' "$dir/deploy/compose/.env" | tail -1)
+    local current=
+    [ ! -f "$dir/deploy/compose/.env" ] || current=$(sed -n 's/^BASTION_VERSION=//p' "$dir/deploy/compose/.env" | tail -1)
+    if [ -n "$current" ]; then
+      # An installed host: the latest version, unless it follows main or a
+      # build, or is already there.
+      case $current in
+        [0-9]*)
+          if ! newer "$BASTION_LATEST" "$current"; then
+            say "$(t "BastionOS $current in $dir is up to date (latest: $BASTION_LATEST)." "BastionOS $current dans $dir est à jour (dernière version : $BASTION_LATEST).")"
+            [ ! -x "$dir/bastionos" ] || link_command "$dir"
+            exit 0
+          fi
+          version=$BASTION_LATEST ;;
+        *) version=$current ;;
+      esac
     else
       version=$BASTION_LATEST
       say "$(t "no version given: installing the latest version, $version" "aucune version donnée : installation de la dernière version, $version")"
@@ -124,6 +137,17 @@ main() {
   [ -z "$bundle" ] || args+=(--premium-registry bastionos)
   [ -z "$yes" ] || args+=(--yes)
   exec "$dir/bastionos" "${args[@]}"
+}
+
+# newer A B: A is a later version than B (1.10.0 > 1.9.2, 1.1.0 > 1.1.0-rc.1).
+newer() {
+  [ "$1" != "$2" ] || return 1
+  local a=${1%%-*} b=${2%%-*}
+  if [ "$a" = "$b" ]; then
+    case $1 in *-*) ;; *) return 0 ;; esac
+    case $2 in *-*) ;; *) return 1 ;; esac
+  fi
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]
 }
 
 # link_command DIR: `bastionos` by name, never over a file that is not a
