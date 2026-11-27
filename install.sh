@@ -30,7 +30,7 @@ set -euo pipefail
 # The latest version: installed when none is named. Moved at each release
 # (docs/deployment/RELEASING.md). "main" installs the latest build of the
 # main branch, for tests only.
-BASTION_LATEST=1.1.0
+BASTION_LATEST=1.1.1
 
 main() {
   local version= dir=${BASTION_INSTALL_DIR:-} registry=ghcr.io/su2626/bastionos bundle= pubkey= unsigned= yes= nobackup=
