@@ -117,8 +117,21 @@ main() {
   BASTION_HOME="$dir" bash "$tmp/bastionos" place-bundle "$tmp"
   rm -rf "$tmp"
   printf '%s\n' "$version" >"$dir/VERSION"
-  if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
-    ln -sf "$dir/bastionos" /usr/local/bin/bastionos
+  # `bastionos` by name: /usr/local/bin when it can be written (root), else
+  # ~/.local/bin (docker group, rootless Docker); never over a file that is
+  # not a link. The full path is said otherwise.
+  local d at=
+  for d in /usr/local/bin ${HOME:+"$HOME/.local/bin"}; do
+    [ "$d" = /usr/local/bin ] || mkdir -p "$d" 2>/dev/null || continue
+    [ -d "$d" ] && [ -w "$d" ] || continue
+    [ ! -e "$d/bastionos" ] || [ -L "$d/bastionos" ] || continue
+    ln -sfn "$dir/bastionos" "$d/bastionos" 2>/dev/null || continue
+    at=$d; break
+  done
+  if [ -z "$at" ]; then
+    warn "$(t "the command is $dir/bastionos (no link could be made: sudo ln -s $dir/bastionos /usr/local/bin/bastionos)" "la commande est $dir/bastionos (aucun lien n'a pu être créé : sudo ln -s $dir/bastionos /usr/local/bin/bastionos)")"
+  else
+    case ":$PATH:" in *":$at:"*) ;; *) warn "$(t "$at is not in PATH: open a new session, or run $dir/bastionos" "$at n'est pas dans le PATH : ouvrez une nouvelle session, ou lancez $dir/bastionos")" ;; esac
   fi
 
   local args=(install --version "$version" --registry "$registry")
