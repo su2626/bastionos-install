@@ -103,6 +103,7 @@ main() {
   # An installed host is upgraded: its own command knows how.
   if [ -s "$dir/deploy/compose/.env" ] && [ -x "$dir/bastionos" ]; then
     say "$(t "BastionOS is installed in $dir: upgrading to $version." "BastionOS est installé dans $dir : mise à jour vers $version.")"
+    link_command "$dir"
     exec "$dir/bastionos" upgrade "$version" ${yes:+--yes} ${nobackup:+--no-backup}
   fi
 
@@ -117,14 +118,36 @@ main() {
   BASTION_HOME="$dir" bash "$tmp/bastionos" place-bundle "$tmp"
   rm -rf "$tmp"
   printf '%s\n' "$version" >"$dir/VERSION"
-  if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
-    ln -sf "$dir/bastionos" /usr/local/bin/bastionos
-  fi
+  link_command "$dir"
 
   local args=(install --version "$version" --registry "$registry")
   [ -z "$bundle" ] || args+=(--premium-registry bastionos)
   [ -z "$yes" ] || args+=(--yes)
   exec "$dir/bastionos" "${args[@]}"
+}
+
+# link_command DIR: `bastionos` by name, never over a file that is not a
+# link; the full path is said when no link is found in PATH.
+link_command() {
+  local dir=$1 d at=
+  # Root: both /usr/local/bin and /usr/bin, so that any root shell finds it
+  # (su, sudo -i, SSH: some lack /usr/local/bin). Otherwise ~/.local/bin.
+  for d in /usr/local/bin /usr/bin; do
+    [ -d "$d" ] && [ -w "$d" ] || continue
+    [ ! -e "$d/bastionos" ] || [ -L "$d/bastionos" ] || continue
+    ln -sfn "$dir/bastionos" "$d/bastionos" 2>/dev/null || continue
+    at=$d
+  done
+  if [ -z "$at" ] && [ -n "${HOME:-}" ] && mkdir -p "$HOME/.local/bin" 2>/dev/null &&
+    { [ ! -e "$HOME/.local/bin/bastionos" ] || [ -L "$HOME/.local/bin/bastionos" ]; } &&
+    ln -sfn "$dir/bastionos" "$HOME/.local/bin/bastionos" 2>/dev/null; then
+    at=$HOME/.local/bin
+  fi
+  if [ -z "$at" ]; then
+    warn "$(t "the command is $dir/bastionos (no link could be made: sudo ln -s $dir/bastionos /usr/bin/bastionos)" "la commande est $dir/bastionos (aucun lien n'a pu être créé : sudo ln -s $dir/bastionos /usr/bin/bastionos)")"
+  else
+    case ":$PATH:" in *":$at:"*) say "$(t "command: bastionos (→ $dir/bastionos)" "commande : bastionos (→ $dir/bastionos)")" ;; *) warn "$(t "$at is not in PATH: open a new session, or run $dir/bastionos" "$at n'est pas dans le PATH : ouvrez une nouvelle session, ou lancez $dir/bastionos")" ;; esac
+  fi
 }
 
 t() { if [ -n "${FR:-}" ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
